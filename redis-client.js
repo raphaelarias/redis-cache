@@ -6,8 +6,15 @@ import config from './redis-config';
 const settings = Meteor.settings;
 
 // Get settings from package: cultofcoders:redis-oplog
-const redisSettings = settings.redisOplog || settings.redis;
+const redisSettings = settings.redisOplog || settings.redis || {};
 const options = { ...config.redis, ...redisSettings };
+
+// Set array to store cached collections
+if (settings.redis) {
+  Meteor.settings.redis.cachedCollections = [];
+} else {
+  Meteor.settings.redis = { cachedCollections: [] };
+}
 
 export function createRedisClient() {
   const client = redis.createClient(options);
@@ -22,18 +29,26 @@ export function createRedisClient() {
 }
 
 const redisInstance = createRedisClient();
-const set = Meteor.wrapAsync(redisInstance.set, redisInstance);
-const get = Meteor.wrapAsync(redisInstance.get, redisInstance);
-const del = Meteor.wrapAsync(redisInstance.del, redisInstance);
+const redisCommands = {
+  set: Meteor.wrapAsync(redisInstance.set, redisInstance),
+  get: Meteor.wrapAsync(redisInstance.get, redisInstance),
+  del: Meteor.wrapAsync(redisInstance.del, redisInstance),
+};
 
-export function redisSet(_id, document) {
-  return set(_id, JSON.stringify(document), 'EX', options.EX || 604800); // One week expiration
-}
+export function exec(command, _id, document) {
+  try {
+    if (settings.redis.debug) {
+      console.log(`Executing command "${command}" on Redis, document _id: ${_id}"`);
+    }
 
-export function redisGet(_id) {
-  return get(_id);
-}
+    if (command === 'set') {
+      return redisCommands[command](_id, JSON.stringify(document), 'EX', options.EX);
+    }
 
-export function redisDel(_id) {
-  return del(_id);
+    return redisCommands[command](_id);
+  } catch (error) {
+    console.error(`Error executing command "${command}" on Redis, document _id: ${_id}: ${error}`);
+  }
+
+  return null;
 }

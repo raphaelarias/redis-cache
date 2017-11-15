@@ -15,6 +15,9 @@ Package.onUse((api) => {
   api.use([
     'mongo',
     'ecmascript',
+    'underscore',
+    'lai:collection-extensions@0.2.1_1',
+    'matb33:collection-hooks@0.8.1',
   ], 'server');
 
   api.addFiles([

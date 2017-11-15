@@ -1,24 +1,44 @@
 // RedisDB Cache
 
 import { MongoInternals } from 'meteor/mongo';
-import { redisSet, redisGet, redisDel } from './redis-client';
+import { exec } from './redis-client';
 
 // Clone MongoInternals.Connection.prototype storing the original functions
-const { insert, find, findOne, update, upsert, remove } = { ...MongoInternals.Connection.prototype };
+const { find, findOne } = { ...MongoInternals.Connection.prototype };
 
-MongoInternals.Connection.prototype.insert = function (collection, document) {
-  if (document && document._id) {
-    redisSet(document._id, JSON.stringify(document));
-  }
+CollectionExtensions.addPrototype('cacheOnRedis', function (keys) {
+  const Collection = this;
+  const collectionName = this._name;
 
-  return insert.apply(this, arguments);
-};
+  // Store the name of the cached collections
+  Meteor.settings.redis.cachedCollections.push(collectionName);
 
-MongoInternals.Connection.prototype.findOne = function (collection, selector, mod, options) {
+  // AFTER INSERT
+  Collection.after.insert((userId, doc) => {
+    exec('set', `${collectionName}_${doc._id}`, JSON.stringify(doc));
+  });
+
+  // AFTER UPDATE
+  Collection.after.update((userId, doc) => {
+    exec('set', `${collectionName}_${doc._id}`, JSON.stringify(doc));
+  }, { fetchPrevious: false });
+
+  // AFTER UPSERT
+  Collection.after.upsert((userId, doc) => {
+    exec('set', `${collectionName}_${doc._id}`, JSON.stringify(doc));
+  }, { fetchPrevious: false });
+
+  // AFTER REMOVE
+  Collection.after.remove((userId, doc) => {
+    exec('del', `${collectionName}_${doc}`._id);
+  });
+});
+
+MongoInternals.Connection.prototype.findOne = function (collectionName, selector) {
   const _id = typeof selector === 'string' ? selector : selector._id;
 
   if (_id) {
-    const redisResult = redisGet(_id);
+    const redisResult = exec('get', `${collectionName}_${_id}`);
 
     if (redisResult) {
       return JSON.parse(redisResult);
@@ -26,14 +46,4 @@ MongoInternals.Connection.prototype.findOne = function (collection, selector, mo
   }
 
   return findOne.apply(this, arguments);
-};
-
-MongoInternals.Connection.prototype.remove = function (collection, selector, mod, options) {
-  const _id = typeof selector === 'string' ? selector : selector._id;
-
-  if (_id) {
-    redisDel(_id);
-  }
-
-  return remove.apply(this, arguments);
 };
